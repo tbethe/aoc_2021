@@ -32,6 +32,7 @@ fn main() {
     let days: Vec<Box<dyn Aoc2021>> = vec![
         day1::Day1::new(use_test_input),
         day2::Day2::new(use_test_input),
+        day3::Day3::new(use_test_input),
     ];
 
     let aoc_day = days.get(day - 1 ).unwrap_or_else(|| {
