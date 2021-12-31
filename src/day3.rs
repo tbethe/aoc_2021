@@ -1,104 +1,154 @@
 use crate::{utils, aoc_day::Aoc2021};
 
 pub struct Day3 {
-    // parsed to lines
-    input: Vec<String>
-    
+    /// input parsed to u16
+    input: Vec<u16>,
+    /// number of bits of the numbers in the input
+    bit_length: usize,
 }
 
 impl Aoc2021 for Day3 {
+
     fn part1(&self) -> String {
 
-        // Step 1. Get the width of the binary numbers
-        let bit_width = self.input.first()
-            .expect("The input should not be empty.")
-            .len();
+        let mut gamma_rate: u16 = 0;
 
-        // Step 2. For each position, count the number of 1's.
-        // Step 3. map the count to majority.
-        let majority = majority(&self.input, bit_width);
-        // Step 4. Calculate the gamma rate (parse the integer)
-        let gamma_rate = i32::from_str_radix(&majority, 2)
-            .expect("We expected the input lines to only have binary strings.");
-        // Step 5. Calculate the epsilon rate
-        //      logical not (invert the bits)
-        //      then get rid of the 1's at the beginning by shifting left and then right.
-        //      it is important that we work with 32 bit integers
-        let shift: i32 = (32 - bit_width).try_into().unwrap();
+        for b in 0..self.bit_length {
+            
+            let mut zeros = 0;
+            let mut ones = 0;
+            
+            for int in &self.input {
+                
+                if (1 << b) & int != 0 {
+                    ones += 1;
+                } else {
+                    zeros += 1;
+                }
+            }
+            if ones > zeros {
+                gamma_rate |= 1 << b; 
+            }
+
+        }
+
+        let shift = 16 - self.bit_length;
         let epsilon_rate = (!gamma_rate << shift) >> shift;
- 
 
         format!(
             "Gamma rate: {}\nEpsilon rate: {}\nPower Consumption: {}",
-            gamma_rate, epsilon_rate, gamma_rate * epsilon_rate
+            gamma_rate, epsilon_rate, gamma_rate as usize * epsilon_rate as usize
         )
     }
 
     fn part2(&self) -> String {
-        let bit_width = self.input.first()
-            .expect("The input should not be empty.")
-            .len();
-        let majority = majority(&self.input, bit_width);
+        
+        fn filter(
+            mut input: Vec<u16>, 
+            bit_length : usize,
+            criteria: fn(u16, u16) -> bool
+        ) -> u16 {
+            for b in (0..bit_length).rev() {
 
-        // Does a pass removing all binary strings that do not 
-        // comply with the bit criteria at this index.
-        fn pass<T: AsRef<str>>(input: &[T], index: usize, majority: String) -> &[T] {
-            input.iter().filter(|s|{
-                s.as_ref().cha == majority.chars().[index]
-            }).collect();
+                let majority_bit = majority_bit(&input, bit_length, b).unwrap();
+                input = input.into_iter()
+                    .filter( |i|
+                        criteria(majority_bit.as_u16(), ((1 << b) & i) >> b)
+                    ).collect();
+
+                if input.len() == 1 {
+                    return *input.first().unwrap()
+                }
+            }
+            return 0
         }
         
-        let mut remainder = self.input.as_slice();
-        for i in 0..bit_width {
-            pass( remainder, i, majority);
-            if remainder.len() <= 1 { break; }
-        }
+        let copy = self.input.clone();
+        let oxygen = filter(
+            copy,
+            self.bit_length,
+            |maj , b|  maj == b
+        );
         
-        todo!()
+        let copy = self.input.clone();
+        let co2 = filter(
+            copy,
+            self.bit_length,
+            |maj , b|  maj != b
+        );
+
+        format!(
+            "Oxygen rating: {}\nO2 scrubber rating: {}\nLife support rating: {}",
+            oxygen, co2, oxygen as usize * co2 as usize
+        )
     }
 
+    /// Returns day 3 struct
+    /// Load input for day 3.
+    /// 
+    /// * `input` Input parsed to a vector of u16 integers. 
+    /// * `bit_length` bit length of the binary numbers in the input
     fn new(test_input: bool) -> Box<Self>
         where 
             Self : Sized {
+        let input_string = utils::get_input(3, test_input);
+        let bit_length = input_string.split_once('\n')
+            .expect("Input was unexpectedly empty.")
+            .0
+            .len();
         Box::new(
             Day3 { 
-                input: utils::get_input(3, test_input)
+                input : input_string
                     .lines()
-                    .map(|s|s.trim().to_string())
-                    .collect::<Vec<String>>() 
+                    .map(|s| u16::from_str_radix(s, 2).unwrap())
+                    .collect(),
+                bit_length
             }
         )
     }
 }
 
-/// Given a vector of binary strings of width `bit_width`, this function returns
-/// a String with on each index of that string a 1 if there was a majority of 1's at that index of the input string
 /// 
-/// Example:
-/// ```rust
-/// assert_!(
-///     majority(vec!["100", "101", "000"]), "100".to_string()
-/// )
-/// ```
-fn majority<T: AsRef<str>>(input: &[T], bit_width: usize) -> String {
-    // For each position, count the number of 1's.
-    let mut count_vec: Vec<usize> = vec![0; bit_width];    
-    for line in input {
-        for (i, chr) in line.as_ref().chars().enumerate() {
-            if chr == '1' { 
-                count_vec[i] += 1 
-            }
+/// Bit, represents either a zero or a one
+#[derive(PartialEq, Eq, Debug)]
+enum Bit {
+    Zero,
+    One
+}
+
+impl Bit {
+    fn as_u16(&self) -> u16 {
+        match self {
+            Bit::One => 1,
+            Bit::Zero => 0,
         }
-    }   
-    // map the count to majority.
-    let half = input.len() / 2;
-    let mut majority = String::new();
-    for count in count_vec {
-        majority.push(if count < half { 
-            '0'
+    }
+}
+
+/// gets an array of numbers, the width of those number and a bit position.
+/// 
+/// if `width` is larger than 16 or `position` is larger than `width - 1`, returns `None`.
+/// Position of `0` means the least significant bit.
+fn majority_bit(numbers: &[u16], width: usize, position: usize) -> Option<Bit> {
+    
+    if width > 16 || position > width - 1 {
+        return None
+    }
+
+    let mut zeros = 0;
+    let mut ones = 0;
+    
+    for int in numbers {
+        
+        if (1 << position) & *int != 0 {
+            ones += 1;
         } else {
-            '1'
-        });
-    }       
-    majority
+            zeros += 1;
+        }
+    }
+    if ones >= zeros {
+        Some(Bit::One) 
+    } else {
+        Some(Bit::Zero)
+    }
 }
